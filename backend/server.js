@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import connectDB from './config/db.js';
 import authRoutes from './routes/auth.js';
-import Message from './models/Message.js'; // ✅ Updated model with `room` field
+import Message from './models/Message.js';
 
 // Fix __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -35,7 +35,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Routes
 app.use('/api/auth', authRoutes);
 
-// REST Endpoint to get all messages (you can use a query param for room)
+// REST endpoint to fetch messages (optionally by room)
 app.get('/api/chat', async (req, res) => {
   const room = req.query.room;
   try {
@@ -48,15 +48,16 @@ app.get('/api/chat', async (req, res) => {
   }
 });
 
-// Root route
+// Root test route
 app.get('/', (req, res) => {
   res.send("API Running");
 });
 
-// ✅ Socket.IO Room-based Chat
+// ✅ Real-time Socket.IO logic
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
+  // Join room
   socket.on('join_room', async (room) => {
     socket.join(room);
     try {
@@ -67,8 +68,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('send_message', async (data) => {
-    const { sender, message, room, timestamp } = data;
+  // Send message
+  socket.on('send_message', async ({ sender, message, room, timestamp }) => {
     try {
       const newMsg = new Message({ sender, message, room, timestamp });
       await newMsg.save();
@@ -78,6 +79,30 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ✅ Seen/read receipt handler
+  socket.on("message_seen", async ({ messageId, username, room }) => {
+    try {
+      const msg = await Message.findById(messageId);
+      if (msg && !msg.seenBy.includes(username)) {
+        msg.seenBy.push(username);
+        await msg.save();
+        io.to(room).emit("message_seen_update", { messageId, username });
+      }
+    } catch (err) {
+      console.error("Error marking message as seen:", err);
+    }
+  });
+
+  // Typing indicators
+  socket.on('typing', ({ room, user }) => {
+    socket.to(room).emit('user_typing', user);
+  });
+
+  socket.on('stop_typing', ({ room, user }) => {
+    socket.to(room).emit('user_stop_typing', user);
+  });
+
+  // Handle disconnect
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });

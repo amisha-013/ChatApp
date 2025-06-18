@@ -20,7 +20,12 @@ const messageSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  seenBy: {
+    type: [String],
+    default: [],
+  },
 });
 
-// Optional: explicitly set collection name to "messages"
-export default mongoose.model('Message', messageSchema, 'messages');
+const Message = mongoose.model('Message', messageSchema, 'messages');
+
+export default Message;
