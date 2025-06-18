@@ -10,15 +10,16 @@ import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import connectDB from './config/db.js';
 import authRoutes from './routes/auth.js';
+import Message from './models/Message.js'; // ✅ Updated model with `room` field
 
-// ⛔ Fix for ES modules to get __dirname
+// Fix __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ✅ Connect to MongoDB
+// Connect to MongoDB
 connectDB();
 
-// ✅ Express setup
+// Express setup
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -31,65 +32,49 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ✅ Routes
+// Routes
 app.use('/api/auth', authRoutes);
 
-// ✅ Chat Mongoose Model
-const chatSchema = new mongoose.Schema({
-  sender: { type: String, required: true },
-  message: { type: String, required: true },
-  timestamp: { type: Date, default: Date.now },
-});
-const Chat = mongoose.model('Chat', chatSchema);
-
-// ✅ REST Endpoint to get all chat messages (optional)
+// REST Endpoint to get all messages (you can use a query param for room)
 app.get('/api/chat', async (req, res) => {
+  const room = req.query.room;
   try {
-    const messages = await Chat.find().sort({ timestamp: 1 });
+    const messages = room
+      ? await Message.find({ room }).sort({ timestamp: 1 })
+      : await Message.find().sort({ timestamp: 1 });
     res.json(messages);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch messages' });
   }
 });
 
-// ✅ REST Endpoint to post a message (optional)
-app.post('/api/chat', async (req, res) => {
-  try {
-    const { sender, message } = req.body;
-    const newMessage = new Chat({ sender, message });
-    await newMessage.save();
-    res.status(201).json(newMessage);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to save message' });
-  }
-});
-
-// ✅ Root route
+// Root route
 app.get('/', (req, res) => {
   res.send("API Running");
 });
 
-// ✅ Socket.io Events
-io.on('connection', async (socket) => {
+// ✅ Socket.IO Room-based Chat
+io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  // 🔄 Send chat history to newly connected client
-  try {
-    const history = await Chat.find().sort({ timestamp: 1 });
-    socket.emit('chat_history', history);
-  } catch (error) {
-    console.error('Error loading chat history:', error);
-  }
-
-  // 💬 Listen for and broadcast new messages
-  socket.on('send_message', async (data) => {
+  socket.on('join_room', async (room) => {
+    socket.join(room);
     try {
-      const { sender, message, timestamp } = data;
-      const newMsg = new Chat({ sender, message, timestamp });
+      const history = await Message.find({ room }).sort({ timestamp: 1 });
+      socket.emit('chat_history', history);
+    } catch (error) {
+      console.error('Error sending chat history:', error);
+    }
+  });
+
+  socket.on('send_message', async (data) => {
+    const { sender, message, room, timestamp } = data;
+    try {
+      const newMsg = new Message({ sender, message, room, timestamp });
       await newMsg.save();
-      io.emit('receive_message', newMsg);
+      io.to(room).emit('receive_message', newMsg);
     } catch (err) {
-      console.error('Failed to save or emit message:', err);
+      console.error('Failed to save or broadcast message:', err);
     }
   });
 
@@ -98,6 +83,6 @@ io.on('connection', async (socket) => {
   });
 });
 
-// ✅ Start server
+// Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

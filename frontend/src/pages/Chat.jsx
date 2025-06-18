@@ -8,6 +8,7 @@ function Chat({ token, username }) {
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
+  const [room, setRoom] = useState("general"); // ✅ Default room
 
   // 🔒 Redirect to login if no token
   useEffect(() => {
@@ -16,11 +17,15 @@ function Chat({ token, username }) {
     }
   }, [token, navigate]);
 
-  // 🔁 Load chat history once
+  // 📡 Join room & load chat history
   useEffect(() => {
+    if (room) {
+      socket.emit("join_room", room);
+    }
+
     const fetchMessages = async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/chat');
+        const res = await fetch(`http://localhost:5000/api/chat?room=${room}`);
         const data = await res.json();
         if (Array.isArray(data)) {
           setMessages(data);
@@ -33,8 +38,9 @@ function Chat({ token, username }) {
         setMessages([]);
       }
     };
+
     fetchMessages();
-  }, []);
+  }, [room]);
 
   // 🔔 Listen for real-time messages
   useEffect(() => {
@@ -53,12 +59,12 @@ function Chat({ token, username }) {
     const msgData = {
       sender: username,
       message,
+      room,
       timestamp: new Date().toISOString(),
     };
 
-    socket.emit("send_message", msgData); // Real-time
-
-    setMessage(""); // Clear input
+    socket.emit("send_message", msgData);
+    setMessage("");
   };
 
   const handleKeyDown = (e) => {
@@ -69,7 +75,20 @@ function Chat({ token, username }) {
 
   return (
     <div>
-      <h2>Chat Room</h2>
+      <h2>Chat Room: {room}</h2>
+
+      {/* 🔀 Room Selector */}
+      <select
+        value={room}
+        onChange={(e) => setRoom(e.target.value)}
+        style={{ marginBottom: "10px", padding: "6px" }}
+      >
+        <option value="general">General</option>
+        <option value="random">Random</option>
+        <option value="tech">Tech</option>
+      </select>
+
+      {/* 📨 Chat Messages */}
       <div
         style={{
           maxHeight: "300px",
@@ -89,6 +108,8 @@ function Chat({ token, username }) {
           </div>
         ))}
       </div>
+
+      {/* 📝 Message Input */}
       <input
         value={message}
         onChange={(e) => setMessage(e.target.value)}

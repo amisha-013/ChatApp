@@ -11,11 +11,16 @@ const messageSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
+  room: {
+    type: String,
+    required: true,
+    trim: true,
+  },
   timestamp: {
     type: Date,
     default: Date.now,
   },
 });
 
-// Optional: explicitly set collection name
+// Optional: explicitly set collection name to "messages"
 export default mongoose.model('Message', messageSchema, 'messages');
