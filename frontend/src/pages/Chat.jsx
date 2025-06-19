@@ -11,29 +11,20 @@ function Chat({ token, username }) {
   const [room, setRoom] = useState("general");
   const [isTyping, setIsTyping] = useState(false);
   const [typingUser, setTypingUser] = useState(null);
+  const [targetLang, setTargetLang] = useState("en");
 
-  // Redirect to login if no token
   useEffect(() => {
-    if (!token) {
-      navigate("/login");
-    }
+    if (!token) navigate("/login");
   }, [token, navigate]);
 
-  // Join room & load chat history
   useEffect(() => {
-    if (room) {
-      socket.emit("join_room", room);
-    }
+    if (room) socket.emit("join_room", room);
 
     const fetchMessages = async () => {
       try {
         const res = await fetch(`http://localhost:5000/api/chat?room=${room}`);
         const data = await res.json();
-        if (Array.isArray(data)) {
-          setMessages(data);
-        } else {
-          setMessages([]);
-        }
+        setMessages(Array.isArray(data) ? data : []);
       } catch {
         setMessages([]);
       }
@@ -42,28 +33,54 @@ function Chat({ token, username }) {
     fetchMessages();
   }, [room]);
 
-  // Listen for new incoming messages
-  useEffect(() => {
-    socket.on("receive_message", (data) => {
-      setMessages((prev) => [...prev, data]);
-    });
-    return () => {
-      socket.off("receive_message");
-    };
-  }, []);
+  const translateMessage = async (text, target) => {
+    if (!text || !target) return text;
 
-  // Typing indicator listeners
+    try {
+      const res = await fetch("http://localhost:5000/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q: text, target }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error("Translation failed:", errText);
+        return text;
+      }
+
+      const data = await res.json();
+      return data.data?.translations?.[0]?.translatedText || text;
+    } catch (err) {
+      console.error("Translation error:", err);
+      return text;
+    }
+  };
+
+  useEffect(() => {
+    socket.on("receive_message", async (data) => {
+      const translated = await translateMessage(data.message, targetLang);
+      const translatedMsg = { ...data, translatedText: translated };
+      setMessages((prev) => [...prev, translatedMsg]);
+      socket.emit("message_delivered", {
+        messageId: data._id,
+        username,
+        room,
+      });
+    });
+
+    return () => socket.off("receive_message");
+  }, [targetLang]);
+
   useEffect(() => {
     socket.on("user_typing", (user) => setTypingUser(user));
     socket.on("user_stop_typing", () => setTypingUser(null));
-
     return () => {
       socket.off("user_typing");
       socket.off("user_stop_typing");
     };
   }, []);
 
-  // Listen for message seen updates
   useEffect(() => {
     socket.on("message_seen_update", ({ messageId, username: seenUser }) => {
       setMessages((prev) =>
@@ -79,27 +96,39 @@ function Chat({ token, username }) {
         )
       );
     });
-    return () => {
-      socket.off("message_seen_update");
-    };
+    return () => socket.off("message_seen_update");
   }, []);
 
-  // Send message
+  useEffect(() => {
+    socket.on("message_delivered_update", ({ messageId, username: deliveredUser }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg._id === messageId
+            ? {
+                ...msg,
+                deliveredTo: msg.deliveredTo?.includes(deliveredUser)
+                  ? msg.deliveredTo
+                  : [...(msg.deliveredTo || []), deliveredUser],
+              }
+            : msg
+        )
+      );
+    });
+    return () => socket.off("message_delivered_update");
+  }, []);
+
   const sendMessage = () => {
     if (message.trim() === "") return;
-
     const msgData = {
       sender: username,
       message,
       room,
       timestamp: new Date().toISOString(),
     };
-
     socket.emit("send_message", msgData);
     setMessage("");
   };
 
-  // Typing events
   const handleTyping = () => {
     if (!isTyping) {
       setIsTyping(true);
@@ -118,10 +147,6 @@ function Chat({ token, username }) {
     }
   };
 
-  // Emit "message_seen" when rendering messages that user hasn't seen yet
-  // Note: can't put useEffect inside map, so we'll use a helper component below
-
-  // Helper component to emit seen event when a message appears
   function MessageItem({ msg }) {
     useEffect(() => {
       if (!msg.seenBy?.includes(username)) {
@@ -134,12 +159,17 @@ function Chat({ token, username }) {
     }, [msg]);
 
     return (
-      <div key={msg._id} style={{ marginBottom: "8px" }}>
-        <b>{msg.sender}:</b> {msg.message}
+      <div style={{ marginBottom: "8px" }}>
+        <b>{msg.sender}:</b> {msg.translatedText || msg.message}
+        <br />
+        {msg.translatedText && msg.translatedText !== msg.message && (
+          <small style={{ color: "gray" }}>({msg.message})</small>
+        )}
         <br />
         <small style={{ color: "gray" }}>
-          {new Date(msg.timestamp).toLocaleTimeString()}
-          {msg.seenBy?.includes(username) ? " • Seen" : ""}
+          {new Date(msg.timestamp).toLocaleTimeString()}{" "}
+          {msg.deliveredTo?.includes(username) ? "• Delivered" : ""}{" "}
+          {msg.seenBy?.includes(username) ? "• Seen" : ""}
         </small>
       </div>
     );
@@ -149,7 +179,6 @@ function Chat({ token, username }) {
     <div>
       <h2>Chat Room: {room}</h2>
 
-      {/* Room selector */}
       <select
         value={room}
         onChange={(e) => setRoom(e.target.value)}
@@ -160,14 +189,24 @@ function Chat({ token, username }) {
         <option value="tech">Tech</option>
       </select>
 
-      {/* Typing indicator */}
+      <select
+        value={targetLang}
+        onChange={(e) => setTargetLang(e.target.value)}
+        style={{ marginLeft: "10px", padding: "6px" }}
+      >
+        <option value="en">English</option>
+        <option value="es">Spanish</option>
+        <option value="hi">Hindi</option>
+        <option value="fr">French</option>
+        <option value="de">German</option>
+      </select>
+
       {typingUser && (
         <p style={{ fontStyle: "italic", color: "gray" }}>
           {typingUser} is typing...
         </p>
       )}
 
-      {/* Messages */}
       <div
         style={{
           maxHeight: "300px",
@@ -182,7 +221,6 @@ function Chat({ token, username }) {
         ))}
       </div>
 
-      {/* Message input */}
       <input
         value={message}
         onChange={(e) => {
