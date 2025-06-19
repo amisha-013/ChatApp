@@ -6,35 +6,48 @@ const socket = io("http://localhost:5000");
 
 function Chat({ token, username }) {
   const navigate = useNavigate();
+
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [room, setRoom] = useState("general");
+  const [privateReceiver, setPrivateReceiver] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [typingUser, setTypingUser] = useState(null);
   const [targetLang, setTargetLang] = useState("en");
   const [file, setFile] = useState(null);
-
-  const handleFileChange = (e) => setFile(e.target.files[0]);
+  const [users, setUsers] = useState([]);
 
   useEffect(() => {
     if (!token) navigate("/login");
   }, [token, navigate]);
 
   useEffect(() => {
-    if (room) socket.emit("join_room", room);
+    if (username) socket.emit("register_user", username);
+  }, [username]);
 
-    const fetchMessages = async () => {
+  useEffect(() => {
+    const fetchUsers = async () => {
       try {
-        const res = await fetch(`/api/chat?room=${room}`);
+        const res = await fetch(`/api/users?username=${username}`);
         const data = await res.json();
-        setMessages(Array.isArray(data) ? data : []);
-      } catch {
-        setMessages([]);
+        const usernames = data.map(u => (typeof u === 'string' ? u : u.username));
+        setUsers(usernames.filter(u => u !== username));
+      } catch (err) {
+        console.error("Failed to fetch users:", err);
       }
     };
+    fetchUsers();
+  }, [username]);
 
-    fetchMessages();
-  }, [room]);
+  useEffect(() => {
+    if (room) {
+      socket.emit("join_room", room);
+    } else if (privateReceiver) {
+      socket.emit("load_private_history", { sender: username, receiver: privateReceiver });
+    } else {
+      setMessages([]);
+    }
+  }, [room, privateReceiver, username]);
 
   const translateMessage = async (text, target) => {
     if (!text || !target) return text;
@@ -46,71 +59,57 @@ function Chat({ token, username }) {
       });
       const data = await res.json();
       return data.data?.translations?.[0]?.translatedText || text;
-    } catch (err) {
-      console.error("Translation error:", err);
+    } catch {
       return text;
     }
   };
 
   useEffect(() => {
     socket.on("receive_message", async (data) => {
-      const translated = await translateMessage(data.message, targetLang);
-      const translatedMsg = { ...data, translatedText: translated };
-      setMessages((prev) => [...prev, translatedMsg]);
-      socket.emit("message_delivered", {
-        messageId: data._id,
-        username,
-        room,
-      });
+      if (
+        (data.room && data.room === room) ||
+        (data.receiver &&
+          ((data.sender === privateReceiver && data.receiver === username) ||
+           (data.sender === username && data.receiver === privateReceiver)))
+      ) {
+        const translated = await translateMessage(data.message, targetLang);
+        const translatedMsg = { ...data, translatedText: translated };
+        setMessages(prev => [...prev, translatedMsg]);
+      }
     });
 
     return () => socket.off("receive_message");
+  }, [room, privateReceiver, targetLang, username]);
+
+  useEffect(() => {
+    socket.on("private_history", async (history) => {
+      const translated = await Promise.all(
+        history.map(async msg => ({
+          ...msg,
+          translatedText: await translateMessage(msg.message, targetLang),
+        }))
+      );
+      setMessages(translated);
+    });
+
+    return () => socket.off("private_history");
   }, [targetLang]);
 
   useEffect(() => {
-    socket.on("user_typing", (user) => setTypingUser(user));
+    socket.on("user_typing", (user) => {
+      if (
+        (room && user.room === room) ||
+        (privateReceiver && (user.user === privateReceiver || user.user === username))
+      ) {
+        setTypingUser(user.user);
+      }
+    });
     socket.on("user_stop_typing", () => setTypingUser(null));
     return () => {
       socket.off("user_typing");
       socket.off("user_stop_typing");
     };
-  }, []);
-
-  useEffect(() => {
-    socket.on("message_seen_update", ({ messageId, username: seenUser }) => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg._id === messageId
-            ? {
-                ...msg,
-                seenBy: msg.seenBy?.includes(seenUser)
-                  ? msg.seenBy
-                  : [...(msg.seenBy || []), seenUser],
-              }
-            : msg
-        )
-      );
-    });
-    return () => socket.off("message_seen_update");
-  }, []);
-
-  useEffect(() => {
-    socket.on("message_delivered_update", ({ messageId, username: deliveredUser }) => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg._id === messageId
-            ? {
-                ...msg,
-                deliveredTo: msg.deliveredTo?.includes(deliveredUser)
-                  ? msg.deliveredTo
-                  : [...(msg.deliveredTo || []), deliveredUser],
-              }
-            : msg
-        )
-      );
-    });
-    return () => socket.off("message_delivered_update");
-  }, []);
+  }, [room, privateReceiver, username]);
 
   const sendMessage = async () => {
     let fileUrl = null;
@@ -124,16 +123,9 @@ function Chat({ token, username }) {
           method: "POST",
           body: formData,
         });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`Upload failed: ${res.status} – ${errText}`);
-        }
-
         const data = await res.json();
         fileUrl = data.url;
-      } catch (err) {
-        console.error("Upload error:", err.message);
+      } catch {
         return;
       } finally {
         setFile(null);
@@ -145,10 +137,15 @@ function Chat({ token, username }) {
     const msgData = {
       sender: username,
       message: message.trim(),
-      room,
-      timestamp: new Date().toISOString(),
       media: fileUrl,
+      timestamp: new Date().toISOString(),
     };
+
+    if (room) {
+      msgData.room = room;
+    } else if (privateReceiver) {
+      msgData.receiver = privateReceiver;
+    }
 
     socket.emit("send_message", msgData);
     setMessage("");
@@ -157,10 +154,12 @@ function Chat({ token, username }) {
   const handleTyping = () => {
     if (!isTyping) {
       setIsTyping(true);
-      socket.emit("typing", { room, user: username });
+      const target = room ? { room, user: username } : { to: privateReceiver, user: username };
+      socket.emit("typing", target);
       setTimeout(() => {
         setIsTyping(false);
-        socket.emit("stop_typing", { room, user: username });
+        const stopTarget = room ? { room, user: username } : { to: privateReceiver, user: username };
+        socket.emit("stop_typing", stopTarget);
       }, 3000);
     }
   };
@@ -168,21 +167,12 @@ function Chat({ token, username }) {
   const handleKeyDown = (e) => {
     if (e.key === "Enter") {
       sendMessage();
-      socket.emit("stop_typing", { room, user: username });
+      const stopTarget = room ? { room, user: username } : { to: privateReceiver, user: username };
+      socket.emit("stop_typing", stopTarget);
     }
   };
 
   function MessageItem({ msg }) {
-    useEffect(() => {
-      if (!msg.seenBy?.includes(username)) {
-        socket.emit("message_seen", {
-          messageId: msg._id,
-          username,
-          room,
-        });
-      }
-    }, [msg]);
-
     const media = msg.media?.toLowerCase();
 
     return (
@@ -203,83 +193,120 @@ function Chat({ token, username }) {
         )}
         <br />
         <small style={{ color: "gray" }}>
-          {new Date(msg.timestamp).toLocaleTimeString()}{" "}
-          {msg.deliveredTo?.includes(username) ? "• Delivered" : ""}{" "}
-          {msg.seenBy?.includes(username) ? "• Seen" : ""}
+          {new Date(msg.timestamp).toLocaleTimeString()}
         </small>
       </div>
     );
   }
 
   return (
-    <div>
-      <h2>Chat Room: {room}</h2>
+    <div style={{ display: "flex", height: "90vh" }}>
+      {/* Sidebar */}
+      <div style={{ width: "250px", padding: "10px", borderRight: "1px solid #ccc" }}>
+        <h4>Room</h4>
+        <select
+          value={room || ""}
+          onChange={(e) => {
+            setRoom(e.target.value);
+            setPrivateReceiver("");
+          }}
+          style={{ width: "100%", padding: "6px", marginBottom: "10px" }}
+        >
+          <option value="general">General</option>
+          <option value="random">Random</option>
+          <option value="tech">Tech</option>
+          <option value="">-- None --</option>
+        </select>
 
-      <select
-        value={room}
-        onChange={(e) => setRoom(e.target.value)}
-        style={{ marginBottom: "10px", padding: "6px" }}
-      >
-        <option value="general">General</option>
-        <option value="random">Random</option>
-        <option value="tech">Tech</option>
-      </select>
+        <h4>Private Chat</h4>
+        <select
+          value={privateReceiver}
+          onChange={(e) => {
+            setPrivateReceiver(e.target.value);
+            setRoom("");
+          }}
+          style={{ width: "100%", padding: "6px", marginBottom: "10px" }}
+        >
+          <option value="">-- Select user --</option>
+          {users.map((u) => (
+            <option key={u} value={u}>
+              {u}
+            </option>
+          ))}
+        </select>
 
-      <select
-        value={targetLang}
-        onChange={(e) => setTargetLang(e.target.value)}
-        style={{ marginLeft: "10px", padding: "6px" }}
-      >
-        <option value="en">English</option>
-        <option value="es">Spanish</option>
-        <option value="hi">Hindi</option>
-        <option value="fr">French</option>
-        <option value="de">German</option>
-      </select>
-
-      {typingUser && (
-        <p style={{ fontStyle: "italic", color: "gray" }}>
-          {typingUser} is typing...
-        </p>
-      )}
-
-      <div
-        style={{
-          maxHeight: "300px",
-          overflowY: "auto",
-          border: "1px solid #ccc",
-          padding: "10px",
-          marginBottom: "10px",
-        }}
-      >
-        {messages.map((msg) => (
-          <MessageItem key={msg._id || msg.timestamp} msg={msg} />
-        ))}
+        <h4>Language</h4>
+        <select
+          value={targetLang}
+          onChange={(e) => setTargetLang(e.target.value)}
+          style={{ width: "100%", padding: "6px" }}
+        >
+          <option value="en">English</option>
+          <option value="es">Spanish</option>
+          <option value="hi">Hindi</option>
+          <option value="fr">French</option>
+          <option value="de">German</option>
+        </select>
       </div>
 
-      <input
-        type="file"
-        accept="image/*,video/*"
-        onChange={handleFileChange}
-        style={{ marginBottom: "10px" }}
-      />
-      <br />
-      <input
-        value={message}
-        onChange={(e) => {
-          setMessage(e.target.value);
-          handleTyping();
-        }}
-        onKeyDown={handleKeyDown}
-        placeholder="Type your message..."
-        style={{ width: "80%", padding: "8px" }}
-      />
-      <button
-        onClick={sendMessage}
-        style={{ padding: "8px 12px", marginLeft: "8px" }}
-      >
-        Send
-      </button>
+      {/* Chat Area */}
+      <div style={{ flex: 1, padding: "15px", display: "flex", flexDirection: "column" }}>
+        <h2 style={{ marginBottom: "10px" }}>
+          {room
+            ? `Room: ${room}`
+            : privateReceiver
+            ? `Private chat with ${privateReceiver}`
+            : "Select a chat"}
+        </h2>
+
+        {typingUser && (
+          <p style={{ fontStyle: "italic", color: "gray" }}>{typingUser} is typing...</p>
+        )}
+
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            border: "1px solid #ccc",
+            padding: "10px",
+            marginBottom: "10px",
+            backgroundColor: "#f9f9f9",
+          }}
+        >
+          {messages.length === 0 && (
+            <p style={{ color: "gray" }}>No messages yet. Start the conversation!</p>
+          )}
+          {messages.map((msg) => (
+            <MessageItem key={msg._id || msg.timestamp} msg={msg} />
+          ))}
+        </div>
+
+        <input
+          type="file"
+          accept="image/*,video/*"
+          onChange={(e) => setFile(e.target.files[0])}
+          style={{ marginBottom: "10px" }}
+        />
+
+        <div style={{ display: "flex" }}>
+          <input
+            value={message}
+            onChange={(e) => {
+              setMessage(e.target.value);
+              handleTyping();
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="Type your message..."
+            style={{ flex: 1, padding: "10px" }}
+          />
+          <button
+            onClick={sendMessage}
+            style={{ padding: "10px 15px", marginLeft: "10px" }}
+          >
+            Send
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

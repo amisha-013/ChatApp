@@ -9,18 +9,27 @@ const messageSchema = new mongoose.Schema({
   message: {
     type: String,
     trim: true,
-    default: '', // now optional
+    default: '', // optional text
   },
   room: {
     type: String,
-    required: true,
     trim: true,
+    default: null, // ✅ now optional
+  },
+  receiver: {
+    type: String,
+    trim: true,
+    default: null, // ✅ now optional
   },
   timestamp: {
     type: Date,
     default: Date.now,
   },
   seenBy: {
+    type: [String],
+    default: [],
+  },
+  deliveredTo: {
     type: [String],
     default: [],
   },
@@ -35,9 +44,13 @@ messageSchema.pre('validate', function (next) {
   if (!this.message && !this.media) {
     this.invalidate('message', 'Either message text or media is required.');
   }
+
+  if (!this.room && !this.receiver) {
+    this.invalidate('room', 'Message must have either a room or a receiver.');
+  }
+
   next();
 });
 
 const Message = mongoose.model('Message', messageSchema, 'messages');
-
 export default Message;
