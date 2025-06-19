@@ -22,13 +22,11 @@ function Login({ setToken, setUsername }) {
     }
 
     try {
-      const res = await axios.post('http://localhost:5000/api/auth/login', form, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      const response = await axios.post('/api/auth/login', form, {
+        headers: { 'Content-Type': 'application/json' },
       });
 
-      const { token, username } = res.data;
+      const { token, username } = response.data;
       setToken(token);
       setUsername(username);
       localStorage.setItem('token', token);
@@ -36,7 +34,12 @@ function Login({ setToken, setUsername }) {
       navigate('/chat');
     } catch (err) {
       console.error('Login error:', err);
-      setError(err.response?.data?.message || 'Login failed');
+      setError(
+        err.response?.data?.message ||
+        (err.response?.status === 404
+          ? 'Login route not found. Check your proxy setup.'
+          : 'Login failed. Please try again.')
+      );
     }
   };
 

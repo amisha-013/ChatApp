@@ -12,6 +12,9 @@ function Chat({ token, username }) {
   const [isTyping, setIsTyping] = useState(false);
   const [typingUser, setTypingUser] = useState(null);
   const [targetLang, setTargetLang] = useState("en");
+  const [file, setFile] = useState(null);
+
+  const handleFileChange = (e) => setFile(e.target.files[0]);
 
   useEffect(() => {
     if (!token) navigate("/login");
@@ -22,7 +25,7 @@ function Chat({ token, username }) {
 
     const fetchMessages = async () => {
       try {
-        const res = await fetch(`http://localhost:5000/api/chat?room=${room}`);
+        const res = await fetch(`/api/chat?room=${room}`);
         const data = await res.json();
         setMessages(Array.isArray(data) ? data : []);
       } catch {
@@ -35,20 +38,12 @@ function Chat({ token, username }) {
 
   const translateMessage = async (text, target) => {
     if (!text || !target) return text;
-
     try {
-      const res = await fetch("http://localhost:5000/api/translate", {
+      const res = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ q: text, target }),
       });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        console.error("Translation failed:", errText);
-        return text;
-      }
-
       const data = await res.json();
       return data.data?.translations?.[0]?.translatedText || text;
     } catch (err) {
@@ -117,14 +112,44 @@ function Chat({ token, username }) {
     return () => socket.off("message_delivered_update");
   }, []);
 
-  const sendMessage = () => {
-    if (message.trim() === "") return;
+  const sendMessage = async () => {
+    let fileUrl = null;
+
+    if (file) {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Upload failed: ${res.status} – ${errText}`);
+        }
+
+        const data = await res.json();
+        fileUrl = data.url;
+      } catch (err) {
+        console.error("Upload error:", err.message);
+        return;
+      } finally {
+        setFile(null);
+      }
+    }
+
+    if (!message.trim() && !fileUrl) return;
+
     const msgData = {
       sender: username,
-      message,
+      message: message.trim(),
       room,
       timestamp: new Date().toISOString(),
+      media: fileUrl,
     };
+
     socket.emit("send_message", msgData);
     setMessage("");
   };
@@ -158,10 +183,21 @@ function Chat({ token, username }) {
       }
     }, [msg]);
 
+    const media = msg.media?.toLowerCase();
+
     return (
       <div style={{ marginBottom: "8px" }}>
-        <b>{msg.sender}:</b> {msg.translatedText || msg.message}
+        <b>{msg.sender}:</b>{" "}
+        {msg.translatedText || msg.message || (media && "📎 Media attached")}
         <br />
+        {media?.endsWith(".mp4") && (
+          <video src={msg.media} controls width="300" style={{ marginTop: "5px" }} />
+        )}
+        {[".jpg", ".jpeg", ".png", ".gif", ".webp"].some((ext) =>
+          media?.endsWith(ext)
+        ) && (
+          <img src={msg.media} alt="media" width="200" style={{ marginTop: "5px" }} />
+        )}
         {msg.translatedText && msg.translatedText !== msg.message && (
           <small style={{ color: "gray" }}>({msg.message})</small>
         )}
@@ -221,6 +257,13 @@ function Chat({ token, username }) {
         ))}
       </div>
 
+      <input
+        type="file"
+        accept="image/*,video/*"
+        onChange={handleFileChange}
+        style={{ marginBottom: "10px" }}
+      />
+      <br />
       <input
         value={message}
         onChange={(e) => {

@@ -12,21 +12,19 @@ import mongoose from 'mongoose';
 import connectDB from './config/db.js';
 import authRoutes from './routes/auth.js';
 import Message from './models/Message.js';
-import fetch from 'node-fetch'; // For calling Google Translation API
+import mediaRoutes from './routes/media.js'; // must be a default export
+import fetch from 'node-fetch'; // Google Translate API
 
-// Fix __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Connect to MongoDB
 connectDB();
 
-// Initialize Express app and server
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*', // Allow all origins or set your frontend URL here
+    origin: '*',
   },
 });
 
@@ -34,11 +32,13 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static('uploads'));
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api', mediaRoutes);
 
-// Translation API proxy endpoint
+// Translation
 app.post('/api/translate', async (req, res) => {
   const { q, target } = req.body;
   const apiKey = process.env.GOOGLE_API_KEY;
@@ -66,7 +66,7 @@ app.post('/api/translate', async (req, res) => {
   }
 });
 
-// Fetch messages REST endpoint
+// Fetch all messages
 app.get('/api/chat', async (req, res) => {
   const room = req.query.room;
   try {
@@ -79,12 +79,12 @@ app.get('/api/chat', async (req, res) => {
   }
 });
 
-// Root API test route
+// Health check
 app.get('/', (req, res) => {
   res.send('API Running');
 });
 
-// Socket.IO event handling
+// Socket.IO
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -93,14 +93,23 @@ io.on('connection', (socket) => {
     try {
       const history = await Message.find({ room }).sort({ timestamp: 1 });
       socket.emit('chat_history', history);
-    } catch (error) {
-      console.error('Error sending chat history:', error);
+    } catch (err) {
+      console.error('Error sending chat history:', err);
     }
   });
 
-  socket.on('send_message', async ({ sender, message, room, timestamp }) => {
+  socket.on('send_message', async ({ sender, message, media, room, timestamp }) => {
     try {
-      const newMsg = new Message({ sender, message, room, timestamp });
+      const newMsg = new Message({
+        sender,
+        message,
+        media,
+        room,
+        timestamp,
+        deliveredTo: [sender],
+        seenBy: [],
+      });
+
       await newMsg.save();
       io.to(room).emit('receive_message', newMsg);
     } catch (err) {
@@ -118,6 +127,19 @@ io.on('connection', (socket) => {
       }
     } catch (err) {
       console.error('Error marking message as seen:', err);
+    }
+  });
+
+  socket.on('message_delivered', async ({ messageId, username, room }) => {
+    try {
+      const msg = await Message.findById(messageId);
+      if (msg && !msg.deliveredTo.includes(username)) {
+        msg.deliveredTo.push(username);
+        await msg.save();
+        io.to(room).emit('message_delivered_update', { messageId, username });
+      }
+    } catch (err) {
+      console.error('Error marking message as delivered:', err);
     }
   });
 

@@ -8,8 +8,8 @@ const messageSchema = new mongoose.Schema({
   },
   message: {
     type: String,
-    required: true,
     trim: true,
+    default: '', // now optional
   },
   room: {
     type: String,
@@ -24,6 +24,18 @@ const messageSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+  media: {
+    type: String,
+    default: null,
+  },
+});
+
+// ✅ Ensure either message or media is provided
+messageSchema.pre('validate', function (next) {
+  if (!this.message && !this.media) {
+    this.invalidate('message', 'Either message text or media is required.');
+  }
+  next();
 });
 
 const Message = mongoose.model('Message', messageSchema, 'messages');
