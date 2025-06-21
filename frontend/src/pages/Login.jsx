@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import './Login.css';
 
 function Login({ setToken, setUsername }) {
   const [form, setForm] = useState({ email: '', password: '' });
@@ -9,7 +10,7 @@ function Login({ setToken, setUsername }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value.trim() }));
+    setForm((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e) => {
@@ -44,27 +45,47 @@ function Login({ setToken, setUsername }) {
   };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <h2>Login</h2>
-      <input
-        name="email"
-        type="email"
-        placeholder="Email"
-        value={form.email}
-        onChange={handleChange}
-        required
-      />
-      <input
-        name="password"
-        type="password"
-        placeholder="Password"
-        value={form.password}
-        onChange={handleChange}
-        required
-      />
-      <button type="submit">Login</button>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-    </form>
+    <div className="login-container">
+      <form onSubmit={handleSubmit} className="login-form" noValidate>
+        <h2 className="login-title">Welcome Back</h2>
+
+        <div className="login-fields">
+          <div className="login-field">
+            <label htmlFor="email" className="login-label">Email</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              placeholder="Email"
+              value={form.email}
+              onChange={handleChange}
+              className="login-input"
+              required
+              autoComplete="username"
+            />
+          </div>
+
+          <div className="login-field">
+            <label htmlFor="password" className="login-label">Password</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              placeholder="Password"
+              value={form.password}
+              onChange={handleChange}
+              className="login-input"
+              required
+              autoComplete="current-password"
+            />
+          </div>
+        </div>
+
+        <button type="submit" className="login-button">Sign In</button>
+
+        {error && <p className="login-error">{error}</p>}
+      </form>
+    </div>
   );
 }
 

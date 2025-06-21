@@ -2,7 +2,10 @@ import { useState, useEffect } from "react";
 import { io } from "socket.io-client";
 import { useNavigate } from "react-router-dom";
 
+import "./Chat.css";
+
 const socket = io("http://localhost:5000");
+
 
 function Chat({ token, username }) {
   const navigate = useNavigate();
@@ -30,7 +33,7 @@ function Chat({ token, username }) {
       try {
         const res = await fetch(`/api/users?username=${username}`);
         const data = await res.json();
-        const usernames = data.map(u => (typeof u === 'string' ? u : u.username));
+        const usernames = data.map(u => (typeof u === "string" ? u : u.username));
         setUsers(usernames.filter(u => u !== username));
       } catch (err) {
         console.error("Failed to fetch users:", err);
@@ -84,7 +87,7 @@ function Chat({ token, username }) {
   useEffect(() => {
     socket.on("private_history", async (history) => {
       const translated = await Promise.all(
-        history.map(async msg => ({
+        history.map(async (msg) => ({
           ...msg,
           translatedText: await translateMessage(msg.message, targetLang),
         }))
@@ -176,41 +179,40 @@ function Chat({ token, username }) {
     const media = msg.media?.toLowerCase();
 
     return (
-      <div style={{ marginBottom: "8px" }}>
-        <b>{msg.sender}:</b>{" "}
-        {msg.translatedText || msg.message || (media && "📎 Media attached")}
-        <br />
-        {media?.endsWith(".mp4") && (
-          <video src={msg.media} controls width="300" style={{ marginTop: "5px" }} />
-        )}
-        {[".jpg", ".jpeg", ".png", ".gif", ".webp"].some((ext) =>
-          media?.endsWith(ext)
-        ) && (
-          <img src={msg.media} alt="media" width="200" style={{ marginTop: "5px" }} />
-        )}
-        {msg.translatedText && msg.translatedText !== msg.message && (
-          <small style={{ color: "gray" }}>({msg.message})</small>
-        )}
-        <br />
-        <small style={{ color: "gray" }}>
+      <div className={`message-item ${msg.sender === username ? "own" : ""}`}>
+        <div className="message-sender">{msg.sender}</div>
+        <div className="message-content">
+          {msg.translatedText || msg.message || (media && "📎 Media attached")}
+          {media?.endsWith(".mp4") && (
+            <video src={msg.media} controls width="300" className="message-media" />
+          )}
+          {[".jpg", ".jpeg", ".png", ".gif", ".webp"].some((ext) =>
+            media?.endsWith(ext)
+          ) && (
+            <img src={msg.media} alt="media" className="message-media" />
+          )}
+          {msg.translatedText && msg.translatedText !== msg.message && (
+            <small className="original-text">({msg.message})</small>
+          )}
+        </div>
+        <div className="message-time">
           {new Date(msg.timestamp).toLocaleTimeString()}
-        </small>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", height: "90vh" }}>
-      {/* Sidebar */}
-      <div style={{ width: "250px", padding: "10px", borderRight: "1px solid #ccc" }}>
-        <h4>Room</h4>
+    <div className="chat-container">
+      <aside className="sidebar">
+        <h3>Rooms</h3>
         <select
+          className="select"
           value={room || ""}
           onChange={(e) => {
             setRoom(e.target.value);
             setPrivateReceiver("");
           }}
-          style={{ width: "100%", padding: "6px", marginBottom: "10px" }}
         >
           <option value="general">General</option>
           <option value="random">Random</option>
@@ -218,14 +220,14 @@ function Chat({ token, username }) {
           <option value="">-- None --</option>
         </select>
 
-        <h4>Private Chat</h4>
+        <h3>Private Chat</h3>
         <select
+          className="select"
           value={privateReceiver}
           onChange={(e) => {
             setPrivateReceiver(e.target.value);
             setRoom("");
           }}
-          style={{ width: "100%", padding: "6px", marginBottom: "10px" }}
         >
           <option value="">-- Select user --</option>
           {users.map((u) => (
@@ -235,11 +237,11 @@ function Chat({ token, username }) {
           ))}
         </select>
 
-        <h4>Language</h4>
+        <h3>Language</h3>
         <select
+          className="select"
           value={targetLang}
           onChange={(e) => setTargetLang(e.target.value)}
-          style={{ width: "100%", padding: "6px" }}
         >
           <option value="en">English</option>
           <option value="es">Spanish</option>
@@ -247,49 +249,40 @@ function Chat({ token, username }) {
           <option value="fr">French</option>
           <option value="de">German</option>
         </select>
-      </div>
+      </aside>
 
-      {/* Chat Area */}
-      <div style={{ flex: 1, padding: "15px", display: "flex", flexDirection: "column" }}>
-        <h2 style={{ marginBottom: "10px" }}>
-          {room
-            ? `Room: ${room}`
-            : privateReceiver
-            ? `Private chat with ${privateReceiver}`
-            : "Select a chat"}
-        </h2>
-
-        {typingUser && (
-          <p style={{ fontStyle: "italic", color: "gray" }}>{typingUser} is typing...</p>
-        )}
-
-        <div
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            border: "1px solid #ccc",
-            padding: "10px",
-            marginBottom: "10px",
-            backgroundColor: "#f9f9f9",
-          }}
-        >
-          {messages.length === 0 && (
-            <p style={{ color: "gray" }}>No messages yet. Start the conversation!</p>
+      <main className="chat-main">
+        <header className="chat-header">
+          <h2>
+            {room
+              ? `Room: ${room}`
+              : privateReceiver
+              ? `Private chat with ${privateReceiver}`
+              : "Select a chat"}
+          </h2>
+          {typingUser && (
+            <p className="typing-indicator">{typingUser} is typing...</p>
           )}
-          {messages.map((msg) => (
-            <MessageItem key={msg._id || msg.timestamp} msg={msg} />
-          ))}
-        </div>
+        </header>
 
-        <input
-          type="file"
-          accept="image/*,video/*"
-          onChange={(e) => setFile(e.target.files[0])}
-          style={{ marginBottom: "10px" }}
-        />
+        <section className="messages-container">
+          {messages.length === 0 ? (
+            <p className="no-messages">No messages yet. Start the conversation!</p>
+          ) : (
+            messages.map((msg) => <MessageItem key={msg._id || msg.timestamp} msg={msg} />)
+          )}
+        </section>
 
-        <div style={{ display: "flex" }}>
+        <footer className="chat-input-area">
           <input
+            type="file"
+            accept="image/*,video/*"
+            onChange={(e) => setFile(e.target.files[0])}
+            className="file-input"
+          />
+
+          <input
+            type="text"
             value={message}
             onChange={(e) => {
               setMessage(e.target.value);
@@ -297,16 +290,13 @@ function Chat({ token, username }) {
             }}
             onKeyDown={handleKeyDown}
             placeholder="Type your message..."
-            style={{ flex: 1, padding: "10px" }}
+            className="message-input"
           />
-          <button
-            onClick={sendMessage}
-            style={{ padding: "10px 15px", marginLeft: "10px" }}
-          >
+          <button onClick={sendMessage} className="send-button">
             Send
           </button>
-        </div>
-      </div>
+        </footer>
+      </main>
     </div>
   );
 }

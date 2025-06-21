@@ -37,6 +37,8 @@ const messageSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  
+
 });
 
 // ✅ Ensure either message or media is provided

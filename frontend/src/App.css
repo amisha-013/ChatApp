@@ -1,8 +1,25 @@
+/* Ensure the page takes full height */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Center content vertically and horizontally */
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
   text-align: center;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+/* Optional max-width for layout */
+#root > * {
+  max-width: 1280px;
+  width: 100%;
 }
 
 .logo {

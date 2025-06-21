@@ -135,7 +135,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('send_message', async ({ sender, receiver, room, message, media, timestamp }) => {
+  // 🔁 Message sending and scheduling logic
+  socket.on('send_message', async ({ sender, receiver, room, message, media, timestamp, scheduledTime }) => {
     try {
       const msgData = {
         sender,
@@ -143,28 +144,40 @@ io.on('connection', (socket) => {
         room: room || null,
         message,
         media,
-        timestamp,
+        timestamp: scheduledTime || timestamp,
+        scheduledTime: scheduledTime || null,
       };
 
-      const newMsg = new Message(msgData);
-      await newMsg.save();
+      const sendNow = !scheduledTime || new Date(scheduledTime) <= new Date();
 
-      if (room) {
-        io.to(room).emit('receive_message', newMsg);
-      } else if (receiver) {
-        const receiverSocket = users.get(receiver);
-        const senderSocket = users.get(sender);
-        if (receiverSocket) io.to(receiverSocket).emit('receive_message', newMsg);
-        if (senderSocket && receiverSocket !== senderSocket) {
-          io.to(senderSocket).emit('receive_message', newMsg);
+      const deliverMessage = async () => {
+        const newMsg = new Message(msgData);
+        await newMsg.save();
+
+        if (room) {
+          io.to(room).emit('receive_message', newMsg);
+        } else if (receiver) {
+          const receiverSocket = users.get(receiver);
+          const senderSocket = users.get(sender);
+          if (receiverSocket) io.to(receiverSocket).emit('receive_message', newMsg);
+          if (senderSocket && receiverSocket !== senderSocket) {
+            io.to(senderSocket).emit('receive_message', newMsg);
+          }
         }
+      };
+
+      if (sendNow) {
+        await deliverMessage();
+      } else {
+        const delay = new Date(scheduledTime) - new Date();
+        console.log(`⏰ Scheduling message from ${sender} to send in ${delay}ms`);
+        setTimeout(deliverMessage, delay);
       }
+
     } catch (err) {
       console.error('Message send error:', err);
     }
   });
-
-  // Removed message_seen and message_delivered handlers entirely
 
   socket.on('typing', ({ room, to, user }) => {
     if (room) {
@@ -192,6 +205,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Start Server
+// Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
